@@ -186,10 +186,10 @@ class RESTView(View):
             entity = queryset.get(pk=linked_instance_pk)
         except queryset.model.DoesNotExist:
             raise TypeError('There is no %s instance with primary key: %s' % (
-                queryset.model.__name__, instance_pk))
+                queryset.model.__name__, linked_instance_pk))
         except ValueError:
             raise TypeError('Invalid primary key value for %s instance: %s' % (
-                queryset.model.__name__, instance_pk))
+                queryset.model.__name__, linked_instance_pk))
         else:
             return entity
 
