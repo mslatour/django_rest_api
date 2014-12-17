@@ -302,32 +302,42 @@ class RESTView(View):
         """Handle GET request."""
         cargs = len(args)
 
-        if cargs == 0:
-            # Use case: get collection
-            # URL: {base}/
-            response = self.get_collection(request)
-        elif cargs == 1:
-            # Use case: get entity
-            # URL: {base}/entity
-            response = self.get_entity(request, args[0])
-        elif cargs == 2:
-            # Use case: get linked collection
-            # URL: {base}/entity/collection/
-            response = self.get_linked_collection(request, args[0], args[1])
-        elif cargs == 3:
-            # Use case: get linked entity
-            # URL: {base}/entity/collection/entity
-            response = self.get_linked_entity(
-                    request, args[0], args[1], args[2])
-        else:
+        try:
+            if cargs == 0:
+                # Use case: get collection
+                # URL: {base}/
+                response = self.get_collection(request)
+            elif cargs == 1:
+                # Use case: get entity
+                # URL: {base}/entity
+                response = self.get_entity(request, args[0])
+            elif cargs == 2:
+                # Use case: get linked collection
+                # URL: {base}/entity/collection/
+                response = self.get_linked_collection(request, args[0], args[1])
+            elif cargs == 3:
+                # Use case: get linked entity
+                # URL: {base}/entity/collection/entity
+                response = self.get_linked_entity(
+                        request, args[0], args[1], args[2])
+            else:
+                raise Http404
+
+            if isinstance(response, HttpResponse):
+                return response
+            else:
+                response = self.serialize_for_json(request, response)
+                return HttpResponse(json.dumps(response),
+                    content_type='application/json')
+
+        except TypeError:
             raise Http404
 
-        if isinstance(response, HttpResponse):
-            return response
-        else:
-            response = self.serialize_for_json(request, response)
-            return HttpResponse(json.dumps(response),
-                content_type='application/json')
+        except Exception as e:
+            if settings.DEBUG:
+                return HttpResponseBadRequest(str(e))
+            else:
+                return HttpResponseBadRequest()
 
     def post(self, request, *args):
         """Handle POST request."""
