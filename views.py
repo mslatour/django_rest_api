@@ -163,7 +163,8 @@ class RESTView(View):
 
     def get_entity(self, request, instance_pk):
         """Return the entity identified by instance_pk."""
-        base_queryset = self.get_model(request).objects
+        model = self.get_model(request)
+        base_queryset = model.objects
         queryset = self.filter_queryset(request, base_queryset)
         try:
             entity = queryset.get(pk=instance_pk)
@@ -175,6 +176,7 @@ class RESTView(View):
     def get_linked_entity(self, request, instance_pk, linked_name,
             linked_instance_pk):
         """Return the linked entity identified by linked_instance_pk."""
+        model = self.get_model(request)
         entity = self.get_entity(request, instance_pk)
         base_queryset = self.get_linked_queryset(request, entity, linked_name)
         queryset = self.filter_queryset(request, base_queryset)
