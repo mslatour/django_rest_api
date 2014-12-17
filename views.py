@@ -2,6 +2,7 @@
 from django.views.generic.base import View
 from django.db.models.fields import FieldDoesNotExist
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 from django.http import HttpResponse, HttpResponseRedirect, \
         HttpResponseForbidden, HttpResponseBadRequest, Http404
 import json
@@ -104,12 +105,14 @@ class RESTView(View):
         model = self.get_model(request)
         try:
             field, _m, _d, m2m = model._meta.get_field_by_name(linked_name)
-            if not m2m:
-                raise TypeError
-        except (TypeError, FieldDoesNotExist):
-            raise Http404
-        else:
-            return field.rel.to
+        except FieldDoesNotExist:
+            raise TypeError('Field `%s.%s` does not exist.' % (
+                model.__name__, linked_name,))
+        if not m2m:
+            raise TypeError('Field `%s.%s` is not a m2m field.' % (
+                model.__name__, linked_name,))
+
+        return field.rel.to
 
     def get_queryset(self, request):
         """Return the base queryset that can be filtered."""
@@ -120,9 +123,11 @@ class RESTView(View):
         try:
             m2m = entity._meta.get_field_by_name(linked_name)[3]
         except FieldDoesNotExist:
-            raise ValueError
+            raise TypeError('Field `%s.%s` does not exist.' % (
+                entity.__class__.__name__, linked_name,))
         if not m2m:
-            raise ValueError
+            raise TypeError('Field `%s.%s` is not a m2m field.' % (
+                entity.__class__.__name__, linked_name,))
 
         return getattr(entity, linked_name)
 
@@ -204,10 +209,15 @@ class RESTView(View):
         else:
             return entity
 
-    def create_linked_entity(self, request, entity, linked_collection,
+    def create_linked_entity(self, request, instance_pk, linked_collection,
             linked_instance_pk):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
-        raise TypeError()
+        entity = self.get_entity(request, instance_pk)
+        linked_model = get_linked_model(request, linked_collection)
+        linked_entity = get_object_or_404(linked_model, pk=linked_instance_pk)
+        queryset = self.get_linked_queryset(request, entity, linked_collection)
+        queryset.add(linked_entity)
+        entity.save()
 
     def call_collection_method(self, request, method, data):
         """Return the output of the collection method ```method```."""
@@ -222,9 +232,10 @@ class RESTView(View):
                 return collection_method(request, data)
             else:
                 # Unbound method
-                raise TypeError
+                raise TypeError('Unbound methods are not allowed.')
         else:
-            raise TypeError
+            raise TypeError('`%s.%s` is not a callable.' % (
+                model.__name__, method,))
 
     def call_entity_method(self, request, entity, method, data):
         """Return the output of the entity method ```method```."""
@@ -233,15 +244,16 @@ class RESTView(View):
         if callable(entity_method):
             if type(entity_method) == type(lambda x: x):
                 # Static method
-                raise TypeError
+                raise TypeError('Static methods are not allowed.')
             elif entity_method.im_self is not None:
                 # Bound method
                 return entity_method(request, data)
             else:
                 # Unbound method
-                raise TypeError
+                raise TypeError('Unbound methods are not allowed.')
         else:
-            raise TypeError
+            raise TypeError('`%s.%s` is not a callable.' % (
+                entity.__class__.__name__, method,))
 
     def call_linked_collection_method(self, request, entity, linked_collection,
             method, data):
@@ -326,50 +338,54 @@ class RESTView(View):
 
         cargs = len(args)
 
-        if cargs == 0:
-            # Use case: create new entity
-            # URL: {base}/
-            if isinstance(data, dict):
-                response = self.create_entity(request, data)
-            else:
-                return HttpResponseBadRequest()
-        elif cargs == 1:
-            # Use case: call collection method
-            # URL: {base}/method
-            response = self.call_collection_method(
-                    request, args[0], data)
-        elif cargs == 2:
-            # Use case A: create linked entity
-            # URL: {base}/entity/collection/
-            # Use case B: call entity method
-            # URL: {base}/entity/method/
-            try:
-                response = self.create_linked_entity(
-                        request, args[0], args[1], data)
-            except TypeError:
+        try:
+            if cargs == 0:
+                # Use case: create new entity
+                # URL: {base}/
+                if isinstance(data, dict):
+                    response = self.create_entity(request, data)
+                else:
+                    raise ValueError('POST data should contain dictionary')
+            elif cargs == 1:
+                # Use case: call collection method
+                # URL: {base}/method
+                response = self.call_collection_method(
+                        request, args[0], data)
+            elif cargs == 2:
+                # Use case A: create linked entity
+                # URL: {base}/entity/collection/
+                # Use case B: call entity method
+                # URL: {base}/entity/method/
                 try:
-                    response = self.call_entity_method(
+                    response = self.create_linked_entity(
                             request, args[0], args[1], data)
                 except TypeError:
-                    return HttpResponseBadRequest()
-        elif cargs == 3:
-            # Use case: call linked collection method
-            # URL: {base}/entity/collection/method
-            response = self.call_linked_collection_method(
-                    request, args[0], args[1], args[2], data)
-        elif cargs == 4:
-            # Use case: call linked entity method
-            # URL: {base}/entity/collection/entity/method
-            try:
+                    response = self.call_entity_method(
+                            request, args[0], args[1], data)
+            elif cargs == 3:
+                # Use case: call linked collection method
+                # URL: {base}/entity/collection/method
+                response = self.call_linked_collection_method(
+                        request, args[0], args[1], args[2], data)
+            elif cargs == 4:
+                # Use case: call linked entity method
+                # URL: {base}/entity/collection/entity/method
                 response = self.call_linked_entity_method(
                         request, args[0], args[1], args[2], args[3], data)
-            except TypeError:
-                return HttpResponseBadRequest()
 
-        if isinstance(response, HttpResponse):
-            return response
-        else:
-            response = self.serialize_for_json(request, response)
-            return HttpResponse(json.dumps(response),
-                content_type='application/json')
+            if isinstance(response, HttpResponse):
+                return response
+            else:
+                response = self.serialize_for_json(request, response)
+                return HttpResponse(json.dumps(response),
+                    content_type='application/json')
+
+        except TypeError:
+            raise Http404
+
+        except Exception as e:
+            if settings.DEBUG:
+                return HttpResponseBadRequest(str(e))
+            else:
+                return HttpResponseBadRequest()
 
