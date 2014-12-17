@@ -1,0 +1,375 @@
+"""REST API views."""
+from django.views.generic.base import View
+from django.db.models.fields import FieldDoesNotExist
+from django.shortcuts import get_object_or_404
+from django.http import HttpResponse, HttpResponseRedirect, \
+        HttpResponseForbidden, HttpResponseBadRequest, Http404
+import json
+
+class RESTView(View):
+    """Base view for RESTful API's on Django models."""
+
+    @classmethod
+    def urls(cls):
+        """Returns the list of url patterns used by this API.
+
+        These url patterns are:
+
+        GET /
+            Return the collection of entities
+
+        GET /<entity>
+            Return the details of ```<entity>```
+
+        GET /<entity>/<link>/
+            Return the collection of entities that are linked
+            to ```<entity>``` by ```<link>```. By default ```<link>``` must
+            be a many2many field in the Django model of ```<entity>```.
+
+        GET /<entity>/<link>/<linked_entity>
+            Return the entity ```<linked_entity>``` that is
+            linked to ```<entity>``` by ```<link>```.
+
+        PUT /<entity>
+            Alter the properties of ```<entity>``` based on the key-value pairs
+            in the payload. Return a HTTP 404 when ```<entity>``` cannot be
+            found.
+
+        DELETE /<entity>
+            Delete the entity ```<entity>```.
+
+        DELETE /<entity/<link>/<linked_entity>
+            Remove the link between ```<entity>``` and ```<linked_entity>```
+            that was identified by ```<link>```.
+            By default ```<linked_entity>``` is not deleted.
+
+        POST /
+            Create a new entity based on the payload.
+            Return a HTTP 302 redirect to the URL that returns the details
+            of the newly created entity.
+
+        POST /<method>
+            Return the output of ```<method>```, where ```<method>``` is either
+            a class method or a static method. The method must belong to the
+            model class as returned by ```self.get_model(request)```.
+
+        POST /<entity>/<link>/
+            Add a new link between ```<entity>``` and the entity specified
+            by a set of key-value pairs in the payload. By default a HTTP 404
+            is returned if the specified entity cannot be found.
+
+        POST /<entity>/<method>
+            Return the output of ```<method>```, where ```<method>``` is an
+            instance method. The method must belong to the instance referenced
+            by ```<entity>```.
+
+        POST /<entity>/<link>/<method>
+            Return the output of ```<method>```, where ```<method>``` is either
+            a class method or a static method. The method must belong to the
+            model class that handles the ```<link>``` relation. By default
+            this is the intermediate model in django that stores the many2many
+            relationship.
+
+        POST /<entity>/<link>/<linked_entity>/<method>
+            Return the output of ```<method>```, where ```<method>``` is an
+            instance method. The method must belong to the instance referenced
+            by ```<linked_entity>```.
+            The arguments of the method are the request object,
+            the entity ```<entity>``` and the link name ```<link>```.
+        """
+        from django.conf.urls import url
+        return [
+            url(r'^/?$',
+                cls.as_view(), name='collection'),
+            url(r'^/([^/]+)/?$',
+                cls.as_view(), name='entity'),
+            url(r'^/([^/]+)/?$',
+                cls.as_view(), name='collection_method'),
+            url(r'^/'+'([^/]+)/'*2+'?$',
+                cls.as_view(), name='linked_collection'),
+            url(r'^/'+'([^/]+)/'*3+'?$',
+                cls.as_view(), name='linked_entity'),
+            url(r'^/'+'([^/]+)/'*3+'?$',
+                cls.as_view(), name='linked_collection_method'),
+            url(r'^/'+'([^/]+)/'*4+'?$',
+                cls.as_view(), name='linked_entity_method')
+        ]
+
+    def get_model(self, request):
+        """Return the model class for this REST API."""
+        raise NotImplementedError("You must implement the get_model method.")
+
+    def get_linked_model(self, request, linked_name):
+        """Return the linked model class identified by name."""
+        model = self.get_model(request)
+        try:
+            field, _m, _d, m2m = model._meta.get_field_by_name(linked_name)
+            if not m2m:
+                raise TypeError
+        except (TypeError, FieldDoesNotExist):
+            raise Http404
+        else:
+            return field.rel.to
+
+    def get_queryset(self, request):
+        """Return the base queryset that can be filtered."""
+        return self.get_model(request).objects
+
+    def get_linked_queryset(self, request, entity, linked_name):
+        """Return the base linked queryset that can be filtered."""
+        try:
+            m2m = entity._meta.get_field_by_name(linked_name)[3]
+        except FieldDoesNotExist:
+            raise ValueError
+        if not m2m:
+            raise ValueError
+
+        return getattr(entity, linked_name)
+
+    def filter_queryset(self, request, queryset):
+        """Return a filtered queryset based on the request."""
+        fieldnames = queryset.model._meta.get_all_field_names()
+        for field, value in request.GET.iteritems():
+            if field in fieldnames:
+                queryset = self.apply_filter(request, queryset, field, value)
+        return queryset
+
+    def apply_filter(self, request, queryset, field, value):
+        """Apply the GET filter to the queryset."""
+        field_obj = queryset.model._meta.get_field(field)
+        if field_obj.rel is None:
+            return queryset.filter(**{field:value})
+        else:
+            reference = get_object_or_404(field_obj.rel.to, pk=value)
+            return queryset.filter(**{field:reference})
+
+    def get_collection(self, request):
+        """Return a collection of entities."""
+        base_queryset = self.get_model(request).objects
+        queryset = self.filter_queryset(request, base_queryset)
+        return queryset.all()
+
+    def get_linked_collection(self, request, instance_pk, linked_name):
+        """Return a collection of linked entities by linked name."""
+        entity = self.get_entity(request, instance_pk)
+        base_queryset = self.get_linked_queryset(request, entity, linked_name)
+        queryset = self.filter_queryset(request, base_queryset)
+        return queryset.all()
+
+    def get_entity(self, request, instance_pk):
+        """Return the entity identified by instance_pk."""
+        base_queryset = self.get_model(request).objects
+        queryset = self.filter_queryset(request, base_queryset)
+        try:
+            entity = queryset.get(pk=instance_pk)
+        except model.DoesNotExist:
+            raise Http404
+        else:
+            return entity
+
+    def get_linked_entity(self, request, instance_pk, linked_name,
+            linked_instance_pk):
+        """Return the linked entity identified by linked_instance_pk."""
+        entity = self.get_entity(request, instance_pk)
+        base_queryset = self.get_linked_queryset(request, entity, linked_name)
+        queryset = self.filter_queryset(request, base_queryset)
+        try:
+            entity = queryset.get(pk=linked_instance_pk)
+        except model.DoesNotExist:
+            raise Http404
+        else:
+            return entity
+
+    def get_model_form(self, request):
+        """Return a ModelForm subclass for this API's model or None."""
+        from django.forms.models import modelform_factory
+        model = self.get_model(request)
+        fields = filter(lambda x: x.editable and not x.primary_key,
+                model._meta.fields)
+        if fields:
+            return modelform_factory(model, fields=fields)
+        else:
+            return None
+
+    def create_entity(self, request, data):
+        """Create an entity using ```data```."""
+        FormCls = self.get_model_form(request)
+        if FormCls is None:
+            return HttpResponseForbidden()
+        form = FormCls(data)
+        try:
+            entity = form.save()
+        except ValueError as e:
+            return HttpResponseBadRequest(str(e))
+        else:
+            return entity
+
+    def create_linked_entity(self, request, entity, linked_collection,
+            linked_instance_pk):
+        """Add the entity ``linked_instance_pk``` to the linked collection."""
+        raise TypeError()
+
+    def call_collection_method(self, request, method, data):
+        """Return the output of the collection method ```method```."""
+        model = self.get_model(request)
+        collection_method = getattr(model, method, None)
+        if callable(collection_method):
+            if type(collection_method) == type(lambda x: x):
+                # Static method
+                return collection_method(request, data)
+            elif collection_method.im_self is not None:
+                # Bound method
+                return collection_method(request, data)
+            else:
+                # Unbound method
+                raise TypeError
+        else:
+            raise TypeError
+
+    def call_entity_method(self, request, entity, method, data):
+        """Return the output of the entity method ```method```."""
+        entity = self.get_entity(request, entity)
+        entity_method = getattr(entity, method, None)
+        if callable(entity_method):
+            if type(entity_method) == type(lambda x: x):
+                # Static method
+                raise TypeError
+            elif entity_method.im_self is not None:
+                # Bound method
+                return entity_method(request, data)
+            else:
+                # Unbound method
+                raise TypeError
+        else:
+            raise TypeError
+
+    def call_linked_collection_method(self, request, entity, linked_collection,
+            method, data):
+        return HttpResponse("%s(%s)" % (method, str(data)))
+
+    def call_linked_entity_method(self, request, entity, linked_collection,
+            linked_entity, method, data):
+        return HttpResponse("%s(%s)" % (method, str(data)))
+
+    def serialize_for_json(self, request, response):
+        """Return a JSON-serializable representation of the response."""
+        # Test if response is already serializable. If so, keep it as is
+        try:
+            json.dumps(response)
+        except TypeError as e:
+            pass
+        else:
+            return response
+
+        # If response is a dictionary, serialize its values
+        if isinstance(response, dict):
+            for key in response:
+                response[key] = self.serialize_for_json(request, response[key])
+
+        # Try serializing it as an iterable object
+        try:
+            it = iter(response)
+        except TypeError:
+            pass
+        else:
+            return [self.serialize_for_json(request, elem) for elem in it]
+
+        # Try serializing it as an object with a describe function
+        if callable(getattr(response, 'describe', None)):
+            response = response.describe()
+
+        # Test the serialization again, if it fails cast it to a string
+        try:
+            json.dumps(response)
+        except TypeError as e:
+            return str(response)
+        else:
+            return response
+
+    def get(self, request, *args):
+        """Handle GET request."""
+        cargs = len(args)
+
+        if cargs == 0:
+            # Use case: get collection
+            # URL: {base}/
+            response = self.get_collection(request)
+        elif cargs == 1:
+            # Use case: get entity
+            # URL: {base}/entity
+            response = self.get_entity(request, args[0])
+        elif cargs == 2:
+            # Use case: get linked collection
+            # URL: {base}/entity/collection/
+            response = self.get_linked_collection(request, args[0], args[1])
+        elif cargs == 3:
+            # Use case: get linked entity
+            # URL: {base}/entity/collection/entity
+            response = self.get_linked_entity(
+                    request, args[0], args[1], args[2])
+        else:
+            raise Http404
+
+        if isinstance(response, HttpResponse):
+            return response
+        else:
+            response = self.serialize_for_json(request, response)
+            return HttpResponse(json.dumps(response),
+                content_type='application/json')
+
+    def post(self, request, *args):
+        """Handle POST request."""
+        try:
+            data = json.loads(request.body)
+        except ValueError:
+            return HttpResponseBadRequest()
+
+        cargs = len(args)
+
+        if cargs == 0:
+            # Use case: create new entity
+            # URL: {base}/
+            if isinstance(data, dict):
+                response = self.create_entity(request, data)
+            else:
+                return HttpResponseBadRequest()
+        elif cargs == 1:
+            # Use case: call collection method
+            # URL: {base}/method
+            response = self.call_collection_method(
+                    request, args[0], data)
+        elif cargs == 2:
+            # Use case A: create linked entity
+            # URL: {base}/entity/collection/
+            # Use case B: call entity method
+            # URL: {base}/entity/method/
+            try:
+                response = self.create_linked_entity(
+                        request, args[0], args[1], data)
+            except TypeError:
+                try:
+                    response = self.call_entity_method(
+                            request, args[0], args[1], data)
+                except TypeError:
+                    return HttpResponseBadRequest()
+        elif cargs == 3:
+            # Use case: call linked collection method
+            # URL: {base}/entity/collection/method
+            response = self.call_linked_collection_method(
+                    request, args[0], args[1], args[2], data)
+        elif cargs == 4:
+            # Use case: call linked entity method
+            # URL: {base}/entity/collection/entity/method
+            try:
+                response = self.call_linked_entity_method(
+                        request, args[0], args[1], args[2], args[3], data)
+            except TypeError:
+                return HttpResponseBadRequest()
+
+        if isinstance(response, HttpResponse):
+            return response
+        else:
+            response = self.serialize_for_json(request, response)
+            return HttpResponse(json.dumps(response),
+                content_type='application/json')
+
