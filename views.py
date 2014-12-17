@@ -390,8 +390,11 @@ class RESTView(View):
                 return HttpResponse(json.dumps(response),
                     content_type='application/json')
 
-        except TypeError:
-            raise Http404
+        except TypeError as e:
+            if settings.DEBUG:
+                raise Http404(str(e))
+            else:
+                raise Http404()
 
         except Exception as e:
             if settings.DEBUG:
