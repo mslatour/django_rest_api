@@ -163,27 +163,33 @@ class RESTView(View):
 
     def get_entity(self, request, instance_pk):
         """Return the entity identified by instance_pk."""
-        model = self.get_model(request)
-        base_queryset = model.objects
+        base_queryset = self.get_model(request).objects
         queryset = self.filter_queryset(request, base_queryset)
         try:
             entity = queryset.get(pk=instance_pk)
-        except model.DoesNotExist:
-            raise Http404
+        except queryset.model.DoesNotExist:
+            raise TypeError('There is no %s instance with primary key: %s' % (
+                queryset.model.__name__, instance_pk))
+        except ValueError:
+            raise TypeError('Invalid primary key value for %s instance: %s' % (
+                queryset.model.__name__, instance_pk))
         else:
             return entity
 
     def get_linked_entity(self, request, instance_pk, linked_name,
             linked_instance_pk):
         """Return the linked entity identified by linked_instance_pk."""
-        model = self.get_model(request)
         entity = self.get_entity(request, instance_pk)
         base_queryset = self.get_linked_queryset(request, entity, linked_name)
         queryset = self.filter_queryset(request, base_queryset)
         try:
             entity = queryset.get(pk=linked_instance_pk)
-        except model.DoesNotExist:
-            raise Http404
+        except queryset.model.DoesNotExist:
+            raise TypeError('There is no %s instance with primary key: %s' % (
+                queryset.model.__name__, instance_pk))
+        except ValueError:
+            raise TypeError('Invalid primary key value for %s instance: %s' % (
+                queryset.model.__name__, instance_pk))
         else:
             return entity
 
