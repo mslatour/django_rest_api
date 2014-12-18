@@ -148,11 +148,24 @@ class RESTView(View):
             reference = get_object_or_404(field_obj.rel.to, pk=value)
             return queryset.filter(**{field:reference})
 
+    def can_get_entity(self, request, entity):
+        """Return if ```entity``` may be retrieved."""
+        return True
+
+    def can_edit_entity(self, request, entity):
+        """Return if ```entity``` may be edited."""
+        return self.can_get_entity(request, entity)
+
+    def can_delete_entity(self, request, entity):
+        """Return if ```entity``` may be deleted."""
+        return self.can_edit_entity(request, entity)
+
     def get_collection(self, request):
         """Return a collection of entities."""
         base_queryset = self.get_model(request).objects
         queryset = self.filter_queryset(request, base_queryset)
-        return queryset.all()
+        return filter(lambda entity: self.can_get_entity(request, entity),
+                set(queryset.all()))
 
     def get_linked_collection(self, request, instance_pk, linked_name):
         """Return a collection of linked entities by linked name."""
