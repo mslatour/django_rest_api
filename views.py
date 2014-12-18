@@ -221,7 +221,7 @@ class RESTView(View):
             linked_instance_pk):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
         entity = self.get_entity(request, instance_pk)
-        linked_model = get_linked_model(request, linked_collection)
+        linked_model = self.get_linked_model(request, linked_collection)
         linked_entity = get_object_or_404(linked_model, pk=linked_instance_pk)
         queryset = self.get_linked_queryset(request, entity, linked_collection)
         queryset.add(linked_entity)
@@ -306,37 +306,39 @@ class RESTView(View):
         else:
             return response
 
+    def reply_to_response(self, request, reply):
+        """Return a HttpResponse object containing the ```reply```."""
+        if reply is None:
+            return HttpResponse(status_code=204)
+        elif isinstance(reply, HttpResponse):
+            return reply
+        else:
+            serialized_reply = self.serialize_for_json(request, reply)
+            return HttpResponse(json.dumps(serialized_reply),
+                content_type='application/json')
+
     def get(self, request, *args):
         """Handle GET request."""
         cargs = len(args)
 
         try:
             if cargs == 0:
-                # Use case: get collection
-                # URL: {base}/
-                response = self.get_collection(request)
+                # URL: /
+                reply = self.get_collection(request)
             elif cargs == 1:
-                # Use case: get entity
-                # URL: {base}/entity
-                response = self.get_entity(request, args[0])
+                # URL: /entity
+                reply = self.get_entity(request, args[0])
             elif cargs == 2:
-                # Use case: get linked collection
-                # URL: {base}/entity/collection/
-                response = self.get_linked_collection(request, args[0], args[1])
+                # URL: /entity/collection/
+                reply = self.get_linked_collection(request, args[0], args[1])
             elif cargs == 3:
-                # Use case: get linked entity
-                # URL: {base}/entity/collection/entity
-                response = self.get_linked_entity(
+                # URL: /entity/collection/entity
+                reply = self.get_linked_entity(
                         request, args[0], args[1], args[2])
             else:
                 raise Http404
 
-            if isinstance(response, HttpResponse):
-                return response
-            else:
-                response = self.serialize_for_json(request, response)
-                return HttpResponse(json.dumps(response),
-                    content_type='application/json')
+            return reply_to_response(request, reply)
 
         except TypeError as e:
             if settings.DEBUG:
@@ -352,54 +354,39 @@ class RESTView(View):
 
     def post(self, request, *args):
         """Handle POST request."""
-        try:
-            data = json.loads(request.body)
-        except ValueError:
-            return HttpResponseBadRequest()
-
         cargs = len(args)
 
         try:
+            data = json.loads(request.body)
             if cargs == 0:
-                # Use case: create new entity
-                # URL: {base}/
+                # URL: /
                 if isinstance(data, dict):
                     response = self.create_entity(request, data)
                 else:
                     raise ValueError('POST data should contain dictionary')
             elif cargs == 1:
-                # Use case: call collection method
-                # URL: {base}/method
-                response = self.call_collection_method(
+                # URL: /method
+                reply = self.call_collection_method(
                         request, args[0], data)
             elif cargs == 2:
-                # Use case A: create linked entity
-                # URL: {base}/entity/collection/
-                # Use case B: call entity method
-                # URL: {base}/entity/method/
                 try:
-                    response = self.create_linked_entity(
+                    # URL 1): /entity/collection/
+                    reply = self.create_linked_entity(
                             request, args[0], args[1], data)
                 except TypeError:
-                    response = self.call_entity_method(
+                    # URL 2): /entity/method/
+                    reply = self.call_entity_method(
                             request, args[0], args[1], data)
             elif cargs == 3:
-                # Use case: call linked collection method
-                # URL: {base}/entity/collection/method
-                response = self.call_linked_collection_method(
+                # URL: /entity/collection/method
+                reply = self.call_linked_collection_method(
                         request, args[0], args[1], args[2], data)
             elif cargs == 4:
-                # Use case: call linked entity method
-                # URL: {base}/entity/collection/entity/method
-                response = self.call_linked_entity_method(
+                # URL: /entity/collection/entity/method
+                reply = self.call_linked_entity_method(
                         request, args[0], args[1], args[2], args[3], data)
 
-            if isinstance(response, HttpResponse):
-                return response
-            else:
-                response = self.serialize_for_json(request, response)
-                return HttpResponse(json.dumps(response),
-                    content_type='application/json')
+            return reply_to_response(request, reply)
 
         except TypeError as e:
             if settings.DEBUG:
