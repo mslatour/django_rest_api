@@ -152,13 +152,33 @@ class RESTView(View):
         """Return if ```entity``` may be retrieved."""
         return True
 
+    def can_get_linked_entity(self, request, entity, link, linked_entity):
+        """Return if ```linked_entity``` may be retrieved."""
+        return True
+
+    def can_create_entity(self, request, data):
+        """Return if ```data``` may be used to create an entity."""
+        return True
+
+    def can_create_linked_entity(self, request, entity, link, data):
+        """Return if ```data``` may be used to create a linked entity."""
+        return True
+
     def can_edit_entity(self, request, entity):
         """Return if ```entity``` may be edited."""
         return self.can_get_entity(request, entity)
 
+    def can_edit_linked_entity(self, request, entity, link, linked_entity):
+        """Return if ```linked_entity``` may be edited."""
+        return self.can_get_entity(request, linked_entity)
+
     def can_delete_entity(self, request, entity):
         """Return if ```entity``` may be deleted."""
         return self.can_edit_entity(request, entity)
+
+    def can_delete_linked_entity(self, request, entity, link, linked_entity):
+        """Return if ```linked_entity``` may be deleted."""
+        return self.can_edit_entity(request, linked_entity)
 
     def get_collection(self, request):
         """Return a collection of entities."""
@@ -172,7 +192,10 @@ class RESTView(View):
         entity = self.get_entity(request, instance_pk)
         base_queryset = self.get_linked_queryset(request, entity, linked_name)
         queryset = self.filter_queryset(request, base_queryset)
-        return queryset.all()
+        return filter(
+                (lambda linked_entity: self.can_get_linked_entity(
+                        request, entity, linked_name, linked_entity)),
+                set(queryset.all()))
 
     def get_entity(self, request, instance_pk):
         """Return the entity identified by instance_pk."""
@@ -187,7 +210,10 @@ class RESTView(View):
             raise TypeError('Invalid primary key value for %s instance: %s' % (
                 queryset.model.__name__, instance_pk))
         else:
-            return entity
+            if self.can_get_entity(request, entity):
+                return entity
+            else:
+                return HttpResponseForbidden()
 
     def get_linked_entity(self, request, instance_pk, linked_name,
             linked_instance_pk):
@@ -196,7 +222,7 @@ class RESTView(View):
         base_queryset = self.get_linked_queryset(request, entity, linked_name)
         queryset = self.filter_queryset(request, base_queryset)
         try:
-            entity = queryset.get(pk=linked_instance_pk)
+            linked_entity = queryset.get(pk=linked_instance_pk)
         except queryset.model.DoesNotExist:
             raise TypeError('There is no %s instance with primary key: %s' % (
                 queryset.model.__name__, linked_instance_pk))
@@ -204,7 +230,11 @@ class RESTView(View):
             raise TypeError('Invalid primary key value for %s instance: %s' % (
                 queryset.model.__name__, linked_instance_pk))
         else:
-            return entity
+            if self.can_get_linked_entity(request, entity, linked_name,
+                    linked_entity):
+                return linked_entity
+            else:
+                return HttpResponseForbidden()
 
     def get_model_form(self, request):
         """Return a ModelForm subclass for this API's model or None."""
@@ -223,6 +253,9 @@ class RESTView(View):
         if not isinstance(data, dict):
             raise ValueError('POST data should contain dictionary')
 
+        if not self.can_create_entity(request, data):
+            return HttpResponseForbidden()
+
         FormCls = self.get_model_form(request)
         if FormCls is None:
             return HttpResponseForbidden()
@@ -238,6 +271,11 @@ class RESTView(View):
             data):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
         entity = self.get_entity(request, instance_pk)
+
+        if not self.can_create_linked_entity(request, entity,
+                linked_collection, data):
+            return HttpResponseForbidden()
+
         try:
             linked_model = self.get_linked_model(request, linked_collection)
             queryset = self.get_linked_queryset(request, entity,
