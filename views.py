@@ -200,7 +200,8 @@ class RESTView(View):
         fields = filter(lambda x: x.editable and not x.primary_key,
                 model._meta.fields)
         if fields:
-            return modelform_factory(model, fields=fields)
+            field_names = map(lambda x: x.name, fields)
+            return modelform_factory(model, fields=field_names)
         else:
             return None
 
@@ -361,7 +362,7 @@ class RESTView(View):
             if cargs == 0:
                 # URL: /
                 if isinstance(data, dict):
-                    response = self.create_entity(request, data)
+                    reply = self.create_entity(request, data)
                 else:
                     raise ValueError('POST data should contain dictionary')
             elif cargs == 1:
@@ -385,6 +386,8 @@ class RESTView(View):
                 # URL: /entity/collection/entity/method
                 reply = self.call_linked_entity_method(
                         request, args[0], args[1], args[2], args[3], data)
+            else:
+                raise TypeError()
 
             return self.reply_to_response(request, reply)
 
