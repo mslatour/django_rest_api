@@ -338,7 +338,7 @@ class RESTView(View):
             else:
                 raise Http404
 
-            return reply_to_response(request, reply)
+            return self.reply_to_response(request, reply)
 
         except TypeError as e:
             if settings.DEBUG:
@@ -386,7 +386,7 @@ class RESTView(View):
                 reply = self.call_linked_entity_method(
                         request, args[0], args[1], args[2], args[3], data)
 
-            return reply_to_response(request, reply)
+            return self.reply_to_response(request, reply)
 
         except TypeError as e:
             if settings.DEBUG:
