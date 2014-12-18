@@ -207,6 +207,9 @@ class RESTView(View):
 
     def create_entity(self, request, data):
         """Create an entity using ```data```."""
+        if not isinstance(data, dict):
+            raise ValueError('POST data should contain dictionary')
+
         FormCls = self.get_model_form(request)
         if FormCls is None:
             return HttpResponseForbidden()
@@ -219,14 +222,22 @@ class RESTView(View):
             return entity
 
     def create_linked_entity(self, request, instance_pk, linked_collection,
-            linked_instance_pk):
+            data):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
         entity = self.get_entity(request, instance_pk)
-        linked_model = self.get_linked_model(request, linked_collection)
-        linked_entity = get_object_or_404(linked_model, pk=linked_instance_pk)
-        queryset = self.get_linked_queryset(request, entity, linked_collection)
-        queryset.add(linked_entity)
-        entity.save()
+        try:
+            linked_model = self.get_linked_model(request, linked_collection)
+            queryset = self.get_linked_queryset(request, entity,
+                    linked_collection)
+        except TypeError as e:
+            raise e
+        else:
+            if not isinstance(data, dict):
+                raise ValueError('POST data should contain dictionary')
+            else:
+                linked_entity = get_object_or_404(linked_model, **data)
+                queryset.add(linked_entity)
+                entity.save()
 
     def call_collection_method(self, request, method, data):
         """Return the output of the collection method ```method```."""
@@ -310,7 +321,7 @@ class RESTView(View):
     def reply_to_response(self, request, reply):
         """Return a HttpResponse object containing the ```reply```."""
         if reply is None:
-            return HttpResponse(status_code=204)
+            return HttpResponse(status=204)
         elif isinstance(reply, HttpResponse):
             return reply
         else:
@@ -361,10 +372,7 @@ class RESTView(View):
             data = json.loads(request.body)
             if cargs == 0:
                 # URL: /
-                if isinstance(data, dict):
-                    reply = self.create_entity(request, data)
-                else:
-                    raise ValueError('POST data should contain dictionary')
+                reply = self.create_entity(request, data)
             elif cargs == 1:
                 # URL: /method
                 reply = self.call_collection_method(
