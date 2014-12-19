@@ -236,12 +236,16 @@ class RESTView(View):
             else:
                 return HttpResponseForbidden()
 
-    def get_model_form(self, request):
+    def get_model_form(self, request, desired_fields=None):
         """Return a ModelForm subclass for this API's model or None."""
         from django.forms.models import modelform_factory
         model = self.get_model(request)
         fields = filter(lambda x: x.editable and not x.primary_key,
                 model._meta.fields)
+
+        if desired_fields is not None:
+            fields = filter(lambda x: x.name in desired_fields, fields)
+
         if fields:
             field_names = map(lambda x: x.name, fields)
             return modelform_factory(model, fields=field_names)
@@ -289,6 +293,28 @@ class RESTView(View):
 
                 queryset.add(linked_entity)
                 entity.save()
+
+    def edit_entity(self, request, instance_pk, data):
+        """Create an entity using ```data```."""
+        if not isinstance(data, dict):
+            raise ValueError('PUT data should contain dictionary')
+
+        entity = self.get_entity(request, instance_pk)
+
+        if not self.can_edit_entity(request, entity):
+            return HttpResponseForbidden()
+
+        FormCls = self.get_model_form(request, data.keys())
+        if FormCls is None:
+            return HttpResponseForbidden()
+        form = FormCls(data, instance=entity)
+
+        try:
+            entity = form.save()
+        except ValueError as e:
+            return HttpResponseBadRequest(str(e))
+        else:
+            return entity
 
     def call_collection_method(self, request, method, data):
         """Return the output of the collection method ```method```."""
@@ -445,6 +471,33 @@ class RESTView(View):
                 # URL: /entity/collection/entity/method
                 reply = self.call_linked_entity_method(
                         request, args[0], args[1], args[2], args[3], data)
+            else:
+                raise TypeError()
+
+            return self.reply_to_response(request, reply)
+
+        except TypeError as e:
+            if settings.DEBUG:
+                raise Http404(str(e))
+            else:
+                raise Http404()
+
+        except Exception as e:
+            if settings.DEBUG:
+                return HttpResponseBadRequest(str(e))
+            else:
+                return HttpResponseBadRequest()
+
+
+    def put(self, request, *args):
+        """Handle PUT request."""
+        cargs = len(args)
+
+        try:
+            data = json.loads(request.body)
+            if cargs == 1:
+                # URL: /entity
+                reply = self.edit_entity(request, args[0], data)
             else:
                 raise TypeError()
 
