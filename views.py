@@ -160,8 +160,8 @@ class RESTView(View):
         """Return if ```data``` may be used to create an entity."""
         return True
 
-    def can_create_linked_entity(self, request, entity, link, data):
-        """Return if ```data``` may be used to create a linked entity."""
+    def can_create_linked_entity(self, request, entity, link, linked_entity):
+        """Return if ```linked_entity``` may be linked to entity."""
         return True
 
     def can_edit_entity(self, request, entity):
@@ -272,10 +272,6 @@ class RESTView(View):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
         entity = self.get_entity(request, instance_pk)
 
-        if not self.can_create_linked_entity(request, entity,
-                linked_collection, data):
-            return HttpResponseForbidden()
-
         try:
             linked_model = self.get_linked_model(request, linked_collection)
             queryset = self.get_linked_queryset(request, entity,
@@ -287,6 +283,10 @@ class RESTView(View):
                 raise ValueError('POST data should contain dictionary')
             else:
                 linked_entity = get_object_or_404(linked_model, **data)
+                if not self.can_create_linked_entity(request, entity,
+                        linked_collection, linked_entity):
+                    return HttpResponseForbidden()
+
                 queryset.add(linked_entity)
                 entity.save()
 
