@@ -170,7 +170,7 @@ class RESTView(View):
 
     def can_edit_linked_entity(self, request, entity, link, linked_entity):
         """Return if ```linked_entity``` may be edited."""
-        return self.can_get_entity(request, linked_entity)
+        return self.can_get_linked_entity(request, linked_entity)
 
     def can_delete_entity(self, request, entity):
         """Return if ```entity``` may be deleted."""
@@ -178,7 +178,7 @@ class RESTView(View):
 
     def can_delete_linked_entity(self, request, entity, link, linked_entity):
         """Return if ```linked_entity``` may be deleted."""
-        return self.can_edit_entity(request, linked_entity)
+        return self.can_edit_linked_entity(request, linked_entity)
 
     def get_collection(self, request):
         """Return a collection of entities."""
