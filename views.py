@@ -402,6 +402,7 @@ class RESTView(View):
         if isinstance(response, dict):
             for key in response:
                 response[key] = self.serialize_for_json(request, response[key])
+            return response
 
         # Try serializing it as an iterable object
         try:
