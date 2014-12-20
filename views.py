@@ -215,10 +215,13 @@ class RESTView(View):
             else:
                 return HttpResponseForbidden()
 
-    def get_linked_entity(self, request, instance_pk, linked_name,
+    def get_linked_entity(self, request, instance_pk_or_entity, linked_name,
             linked_instance_pk):
         """Return the linked entity identified by linked_instance_pk."""
-        entity = self.get_entity(request, instance_pk)
+        if isinstance(instance_pk_or_entity, self.get_model(request)):
+            entity = instance_pk_or_entity
+        else:
+            entity = self.get_entity(request, instance_pk_or_entity)
         base_queryset = self.get_linked_queryset(request, entity, linked_name)
         queryset = self.filter_queryset(request, base_queryset)
         try:
@@ -315,6 +318,31 @@ class RESTView(View):
             return HttpResponseBadRequest(str(e))
         else:
             return entity
+
+    def delete_entity(self, request, instance_pk):
+        """Delete an entity."""
+
+        entity = self.get_entity(request, instance_pk)
+
+        if not self.can_delete_entity(request, entity):
+            return HttpResponseForbidden()
+
+        entity.delete()
+
+    def delete_linked_entity(self, request, instance_pk, linked_name,
+            linked_instance_pk):
+        """Delete a linked entity."""
+
+        entity = self.get_entity(request, instance_pk)
+        linked_entity = self.get_linked_entity(request, entity,
+                linked_name, linked_instance_pk)
+
+        if not self.can_delete_linked_entity(request, entity, linked_name,
+                linked_entity):
+            return HttpResponseForbidden()
+
+        queryset = self.get_linked_queryset(request, entity, linked_name)
+        queryset.remove(linked_entity)
 
     def call_collection_method(self, request, method, data):
         """Return the output of the collection method ```method```."""
@@ -488,7 +516,6 @@ class RESTView(View):
             else:
                 return HttpResponseBadRequest()
 
-
     def put(self, request, *args):
         """Handle PUT request."""
         cargs = len(args)
@@ -498,6 +525,35 @@ class RESTView(View):
             if cargs == 1:
                 # URL: /entity
                 reply = self.edit_entity(request, args[0], data)
+            else:
+                raise TypeError()
+
+            return self.reply_to_response(request, reply)
+
+        except TypeError as e:
+            if settings.DEBUG:
+                raise Http404(str(e))
+            else:
+                raise Http404()
+
+        except Exception as e:
+            if settings.DEBUG:
+                return HttpResponseBadRequest(str(e))
+            else:
+                return HttpResponseBadRequest()
+
+    def delete(self, request, *args):
+        """Handle DELETE request."""
+        cargs = len(args)
+
+        try:
+            if cargs == 1:
+                # URL: /entity
+                reply = self.delete_entity(request, args[0])
+            elif cargs == 3:
+                # URL: /entity/collection/linked_entity
+                reply = self.delete_linked_entity(request, args[0], args[1],
+                        args[2])
             else:
                 raise TypeError()
 
