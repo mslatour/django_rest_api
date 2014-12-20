@@ -413,7 +413,7 @@ class RESTView(View):
 
         # Try serializing it as an object with a describe function
         if callable(getattr(response, 'describe', None)):
-            response = response.describe()
+            response = self.serialize_for_json(request, response.describe())
 
         # Test the serialization again, if it fails cast it to a string
         try:
