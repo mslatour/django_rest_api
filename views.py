@@ -235,12 +235,17 @@ class RESTView(View):
             else:
                 return HttpResponseForbidden()
 
+    def get_model_form_fields(self, request):
+        """Return the list of available fields for the modelform."""
+        return filter(lambda x: x.editable and not x.primary_key,
+                model._meta.fields)
+
+
     def get_model_form(self, request, desired_fields=None):
         """Return a ModelForm subclass for this API's model or None."""
         from django.forms.models import modelform_factory
         model = self.get_model(request)
-        fields = filter(lambda x: x.editable and not x.primary_key,
-                model._meta.fields)
+        fields = self.get_model_form_fields(request)
 
         if desired_fields is not None:
             fields = filter(lambda x: x.name in desired_fields, fields)
