@@ -237,6 +237,7 @@ class RESTView(View):
 
     def get_model_form_fields(self, request):
         """Return the list of available fields for the modelform."""
+        model = self.get_model(request)
         return filter(lambda x: x.editable and not x.primary_key,
                 model._meta.fields)
 
