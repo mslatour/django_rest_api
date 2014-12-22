@@ -100,17 +100,17 @@ class RESTView(View):
         """Return the model class for this REST API."""
         raise NotImplementedError("You must implement the get_model method.")
 
-    def get_linked_model(self, request, linked_name):
+    def get_linked_model(self, request, link):
         """Return the linked model class identified by name."""
         model = self.get_model(request)
         try:
-            field, _m, _d, m2m = model._meta.get_field_by_name(linked_name)
+            field, _m, _d, m2m = model._meta.get_field_by_name(link)
         except FieldDoesNotExist:
             raise TypeError('Field `%s.%s` does not exist.' % (
-                model.__name__, linked_name,))
+                model.__name__, link,))
         if not m2m:
             raise TypeError('Field `%s.%s` is not a m2m field.' % (
-                model.__name__, linked_name,))
+                model.__name__, link,))
 
         return field.rel.to
 
@@ -118,18 +118,18 @@ class RESTView(View):
         """Return the base queryset that can be filtered."""
         return self.get_model(request).objects
 
-    def get_linked_queryset(self, request, entity, linked_name):
+    def get_linked_queryset(self, request, entity, link):
         """Return the base linked queryset that can be filtered."""
         try:
-            m2m = entity._meta.get_field_by_name(linked_name)[3]
+            m2m = entity._meta.get_field_by_name(link)[3]
         except FieldDoesNotExist:
             raise TypeError('Field `%s.%s` does not exist.' % (
-                entity.__class__.__name__, linked_name,))
+                entity.__class__.__name__, link,))
         if not m2m:
             raise TypeError('Field `%s.%s` is not a m2m field.' % (
-                entity.__class__.__name__, linked_name,))
+                entity.__class__.__name__, link,))
 
-        return getattr(entity, linked_name)
+        return getattr(entity, link)
 
     def filter_queryset(self, request, queryset):
         """Return a filtered queryset based on the request."""
@@ -183,42 +183,42 @@ class RESTView(View):
         return filter(lambda entity: self.can_get_entity(request, entity),
                 set(queryset.all()))
 
-    def get_linked_collection(self, request, instance_pk, linked_name):
+    def get_linked_collection(self, request, instance_pk_or_entity, link):
         """Return a collection of linked entities by linked name."""
-        entity = self.get_entity(request, instance_pk)
-        base_queryset = self.get_linked_queryset(request, entity, linked_name)
+        entity = self.get_entity(request, instance_pk_or_entity)
+        base_queryset = self.get_linked_queryset(request, entity, link)
         queryset = self.filter_queryset(request, base_queryset)
         return filter(
                 (lambda linked_entity: self.can_get_linked_entity(
-                        request, entity, linked_name, linked_entity)),
+                        request, entity, link, linked_entity)),
                 set(queryset.all()))
 
-    def get_entity(self, request, instance_pk):
+    def get_entity(self, request, instance_pk_or_entity):
         """Return the entity identified by instance_pk."""
-        base_queryset = self.get_model(request).objects
-        queryset = self.filter_queryset(request, base_queryset)
-        try:
-            entity = queryset.get(pk=instance_pk)
-        except queryset.model.DoesNotExist:
-            raise TypeError('There is no %s instance with primary key: %s' % (
-                queryset.model.__name__, instance_pk))
-        except ValueError:
-            raise TypeError('Invalid primary key value for %s instance: %s' % (
-                queryset.model.__name__, instance_pk))
-        else:
-            if self.can_get_entity(request, entity):
-                return entity
-            else:
-                return HttpResponseForbidden()
-
-    def get_linked_entity(self, request, instance_pk_or_entity, linked_name,
-            linked_instance_pk):
-        """Return the linked entity identified by linked_instance_pk."""
         if isinstance(instance_pk_or_entity, self.get_model(request)):
             entity = instance_pk_or_entity
         else:
-            entity = self.get_entity(request, instance_pk_or_entity)
-        base_queryset = self.get_linked_queryset(request, entity, linked_name)
+            base_queryset = self.get_model(request).objects
+            queryset = self.filter_queryset(request, base_queryset)
+            try:
+                entity = queryset.get(pk=instance_pk_or_entity)
+            except queryset.model.DoesNotExist:
+                raise TypeError('There is no %s instance with primary key: %s' % (
+                    queryset.model.__name__, instance_pk))
+            except ValueError:
+                raise TypeError('Invalid primary key value for %s instance: %s' % (
+                    queryset.model.__name__, instance_pk))
+
+        if self.can_get_entity(request, entity):
+            return entity
+        else:
+            return HttpResponseForbidden()
+
+    def get_linked_entity(self, request, instance_pk_or_entity, link,
+            linked_instance_pk):
+        """Return the linked entity identified by linked_instance_pk."""
+        entity = self.get_entity(request, instance_pk_or_entity)
+        base_queryset = self.get_linked_queryset(request, entity, link)
         queryset = self.filter_queryset(request, base_queryset)
         try:
             linked_entity = queryset.get(pk=linked_instance_pk)
@@ -229,7 +229,7 @@ class RESTView(View):
             raise TypeError('Invalid primary key value for %s instance: %s' % (
                 queryset.model.__name__, linked_instance_pk))
         else:
-            if self.can_get_linked_entity(request, entity, linked_name,
+            if self.can_get_linked_entity(request, entity, link,
                     linked_entity):
                 return linked_entity
             else:
@@ -276,15 +276,15 @@ class RESTView(View):
         else:
             return entity
 
-    def create_linked_entity(self, request, instance_pk, linked_collection,
+    def create_linked_entity(self, request, instance_pk_or_entity, link,
             data):
         """Add the entity ``linked_instance_pk``` to the linked collection."""
-        entity = self.get_entity(request, instance_pk)
+        entity = self.get_entity(request, instance_pk_or_entity)
 
         try:
-            linked_model = self.get_linked_model(request, linked_collection)
+            linked_model = self.get_linked_model(request, link)
             queryset = self.get_linked_queryset(request, entity,
-                    linked_collection)
+                    link)
         except TypeError as e:
             raise e
         else:
@@ -293,7 +293,7 @@ class RESTView(View):
             else:
                 linked_entity = get_object_or_404(linked_model, **data)
                 if not self.can_create_linked_entity(request, entity,
-                        linked_collection, linked_entity):
+                        link, linked_entity):
                     return HttpResponseForbidden()
 
                 queryset.add(linked_entity)
@@ -331,19 +331,19 @@ class RESTView(View):
 
         entity.delete()
 
-    def delete_linked_entity(self, request, instance_pk, linked_name,
+    def delete_linked_entity(self, request, instance_pk, link,
             linked_instance_pk):
         """Delete a linked entity."""
 
         entity = self.get_entity(request, instance_pk)
         linked_entity = self.get_linked_entity(request, entity,
-                linked_name, linked_instance_pk)
+                link, linked_instance_pk)
 
-        if not self.can_delete_linked_entity(request, entity, linked_name,
+        if not self.can_delete_linked_entity(request, entity, link,
                 linked_entity):
             return HttpResponseForbidden()
 
-        queryset = self.get_linked_queryset(request, entity, linked_name)
+        queryset = self.get_linked_queryset(request, entity, link)
         queryset.remove(linked_entity)
 
     def call_collection_method(self, request, method, data):
@@ -382,11 +382,11 @@ class RESTView(View):
             raise TypeError('`%s.%s` is not a callable.' % (
                 entity.__class__.__name__, method,))
 
-    def call_linked_collection_method(self, request, entity, linked_collection,
+    def call_linked_collection_method(self, request, entity, link,
             method, data):
         return HttpResponse("%s(%s)" % (method, str(data)))
 
-    def call_linked_entity_method(self, request, entity, linked_collection,
+    def call_linked_entity_method(self, request, entity, link,
             linked_entity, method, data):
         return HttpResponse("%s(%s)" % (method, str(data)))
 
