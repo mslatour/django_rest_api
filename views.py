@@ -3,6 +3,7 @@ from django.views.generic.base import View
 from django.db.models.fields import FieldDoesNotExist
 from django.shortcuts import get_object_or_404
 from django.conf import settings
+from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, HttpResponseRedirect, \
         HttpResponseForbidden, HttpResponseBadRequest, Http404
 import json
@@ -212,7 +213,7 @@ class RESTView(View):
         if self.can_get_entity(request, entity):
             return entity
         else:
-            return HttpResponseForbidden()
+            raise PermissionDenied()
 
     def get_linked_entity(self, request, instance_pk_or_entity, link,
             linked_instance_pk):
@@ -233,7 +234,7 @@ class RESTView(View):
                     linked_entity):
                 return linked_entity
             else:
-                return HttpResponseForbidden()
+                raise PermissionDenied()
 
     def get_model_form_fields(self, request):
         """Return the list of available fields for the modelform."""
@@ -263,11 +264,11 @@ class RESTView(View):
             raise ValueError('POST data should contain dictionary')
 
         if not self.can_create_entity(request, data):
-            return HttpResponseForbidden()
+            raise PermissionDenied()
 
         FormCls = self.get_model_form(request)
         if FormCls is None:
-            return HttpResponseForbidden()
+            raise PermissionDenied()
         form = FormCls(data)
         try:
             entity = form.save()
@@ -294,7 +295,7 @@ class RESTView(View):
                 linked_entity = get_object_or_404(linked_model, **data)
                 if not self.can_create_linked_entity(request, entity,
                         link, linked_entity):
-                    return HttpResponseForbidden()
+                    raise PermissionDenied()
 
                 queryset.add(linked_entity)
                 entity.save()
@@ -307,11 +308,11 @@ class RESTView(View):
         entity = self.get_entity(request, instance_pk)
 
         if not self.can_edit_entity(request, entity):
-            return HttpResponseForbidden()
+            raise PermissionDenied()
 
         FormCls = self.get_model_form(request, data.keys())
         if FormCls is None:
-            return HttpResponseForbidden()
+            raise PermissionDenied()
         form = FormCls(data, instance=entity)
 
         try:
@@ -327,7 +328,7 @@ class RESTView(View):
         entity = self.get_entity(request, instance_pk)
 
         if not self.can_delete_entity(request, entity):
-            return HttpResponseForbidden()
+            raise PermissionDenied()
 
         entity.delete()
 
@@ -341,7 +342,7 @@ class RESTView(View):
 
         if not self.can_delete_linked_entity(request, entity, link,
                 linked_entity):
-            return HttpResponseForbidden()
+            raise PermissionDenied()
 
         queryset = self.get_linked_queryset(request, entity, link)
         queryset.remove(linked_entity)
@@ -460,6 +461,12 @@ class RESTView(View):
 
             return self.reply_to_response(request, reply)
 
+        except PermissionDenied as e:
+            if settings.DEBUG:
+                return HttpResponseForbidden(str(e))
+            else:
+                return HttpResponseForbidden()
+
         except TypeError as e:
             if settings.DEBUG:
                 raise Http404(str(e))
@@ -506,6 +513,12 @@ class RESTView(View):
                 raise TypeError()
 
             return self.reply_to_response(request, reply)
+
+        except PermissionDenied as e:
+            if settings.DEBUG:
+                return HttpResponseForbidden(str(e))
+            else:
+                return HttpResponseForbidden()
 
         except TypeError as e:
             if settings.DEBUG:
