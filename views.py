@@ -1,12 +1,14 @@
 """REST API views."""
 from django.views.generic.base import View
 from django.db.models.fields import FieldDoesNotExist
+from django.db.models import Model
 from django.shortcuts import get_object_or_404
 from django.conf import settings
 from django.core.exceptions import PermissionDenied
 from django.http import HttpResponse, HttpResponseRedirect, \
         HttpResponseForbidden, HttpResponseBadRequest, Http404
 import json
+from . import RESTAPI
 
 class RESTView(View):
     """Base view for RESTful API's on Django models."""
@@ -173,6 +175,17 @@ class RESTView(View):
         """Return if ```entity``` may be deleted."""
         return self.can_edit_entity(request, entity)
 
+    def describe_entity(self, request, entity):
+        """Return a serializable description of ```entity```."""
+        if callable(getattr(entity, 'describe', None)):
+            return entity.describe()
+        else:
+            return str(entity)
+
+    def describe_linked_entity(self, request, entity, link, linked_entity):
+        """Return a serializable description of ```linked_entity```."""
+        return self.serialize_for_json(request, linked_entity)
+
     def can_delete_linked_entity(self, request, entity, link, linked_entity):
         """Return if ```linked_entity``` may be deleted."""
         return self.can_create_linked_entity(request, entity, link, linked_entity)
@@ -189,10 +202,13 @@ class RESTView(View):
         entity = self.get_entity(request, instance_pk_or_entity)
         base_queryset = self.get_linked_queryset(request, entity, link)
         queryset = self.filter_queryset(request, base_queryset)
-        return filter(
-                (lambda linked_entity: self.can_get_linked_entity(
+        return [
+                self.describe_linked_entity(request, entity, link,
+                    linked_entity)
+                for linked_entity in filter(
+                    (lambda linked_entity: self.can_get_linked_entity(
                         request, entity, link, linked_entity)),
-                set(queryset.all()))
+                    set(queryset.all()))]
 
     def get_entity(self, request, instance_pk_or_entity):
         """Return the entity identified by instance_pk."""
@@ -205,10 +221,10 @@ class RESTView(View):
                 entity = queryset.get(pk=instance_pk_or_entity)
             except queryset.model.DoesNotExist:
                 raise TypeError('There is no %s instance with primary key: %s' % (
-                    queryset.model.__name__, instance_pk))
+                    queryset.model.__name__, instance_pk_or_entity))
             except ValueError:
                 raise TypeError('Invalid primary key value for %s instance: %s' % (
-                    queryset.model.__name__, instance_pk))
+                    queryset.model.__name__, instance_pk_or_entity))
 
         if self.can_get_entity(request, entity):
             return entity
@@ -241,7 +257,6 @@ class RESTView(View):
         model = self.get_model(request)
         return filter(lambda x: x.editable and not x.primary_key,
                 model._meta.fields)
-
 
     def get_model_form(self, request, desired_fields=None):
         """Return a ModelForm subclass for this API's model or None."""
@@ -406,6 +421,13 @@ class RESTView(View):
             for key in response:
                 response[key] = self.serialize_for_json(request, response[key])
             return response
+
+        # If response is a Django Model, try to delegate to its API view.
+        if isinstance(response, Model):
+            View = RESTAPI.get_view_by_model(response.__class__)
+            if View is not None:
+                return self.serialize_for_json(request,
+                        View().describe_entity(request, response))
 
         # Try serializing it as an iterable object
         try:
