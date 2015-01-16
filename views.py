@@ -568,6 +568,12 @@ class RESTView(View):
 
             return self.reply_to_response(request, reply)
 
+        except PermissionDenied as e:
+            if settings.DEBUG:
+                return HttpResponseForbidden(str(e))
+            else:
+                return HttpResponseForbidden()
+
         except TypeError as e:
             if settings.DEBUG:
                 raise Http404(str(e))
@@ -596,6 +602,12 @@ class RESTView(View):
                 raise TypeError()
 
             return self.reply_to_response(request, reply)
+
+        except PermissionDenied as e:
+            if settings.DEBUG:
+                return HttpResponseForbidden(str(e))
+            else:
+                return HttpResponseForbidden()
 
         except TypeError as e:
             if settings.DEBUG:
